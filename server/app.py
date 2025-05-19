@@ -11,9 +11,20 @@ import librosa
 import logging
 import os
 
+import subprocess
+
+def convert_to_wav(input_path, output_path):
+    # Use ffmpeg to convert any audio to PCM WAV
+    subprocess.run([
+        "ffmpeg", "-y", "-i", input_path,
+        "-ar", "16000", "-ac", "1", "-f", "wav", output_path
+    ], check=True)
+
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)  # <-- allow all origins temporarily
+
+# ALLOW React frontend access
+CORS(app, origins=["http://localhost:3000"], supports_credentials=True)
 
 
 # Configure logging
@@ -59,12 +70,29 @@ def chat():
             return jsonify({"error": "No audio file uploaded"}), 400
 
         audio_file = request.files["audio"]
-        audio_file.save("uploaded_audio.wav")
         
+        # Save original file with temporary name
+        temp_path = "uploaded_audio_temp"
+        audio_file.save(temp_path)
+        
+        try:
+            # Convert to proper WAV format
+            convert_to_wav(temp_path, "uploaded_audio.wav")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg conversion failed: {str(e)}")
+            return jsonify({"error": "Audio format conversion failed"}), 400
+            
+        # Now process the converted WAV file
         user_input = transcribe_audio("uploaded_audio.wav")
+        
+        # Cleanup temporary files
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
         if not user_input.strip():
             return jsonify({"error": "Empty transcription"}), 400
 
+        # Rest of your existing code remains the same...
         history.append(f"User: {user_input}")
         history = history[-max_turns * 2:]  # Trim history
         
@@ -87,5 +115,6 @@ def chat():
         logger.exception("Error in chat endpoint")
         return jsonify({"error": str(e)}), 500
 
+# Change Flask port instead of fighting SIP
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(port=8000)  # In app.py
